@@ -52,25 +52,75 @@
 # plt.tight_layout()
 # plt.show()
 
+# import pandas as pd
+# from xgboost import XGBClassifier
+# from sklearn.metrics import classification_report
+
+# # 📥 Load fused dataset
+# fused = pd.read_csv("data/fused/fused_ndvi_weather_thermal.csv")
+
+# # 🧠 Define features and target
+# features = ['ndvi', 'temp', 'rh', 'wind', 'precip', 'dryness_index']
+# X = fused[features]
+# y = fused['thermal_flag']
+
+# # 🚀 Train model on full data
+# model = XGBClassifier()
+# model.fit(X, y)
+
+# # 📊 Predict on same data
+# y_pred = model.predict(X)
+# print(classification_report(y, y_pred, zero_division=0))
+
+# fused['predicted_risk'] = model.predict_proba(X)[:, 1]
+# fused[['district', 'predicted_risk']].to_csv("data/fused/predicted_risk.csv", index=False)
+
+
+
 import pandas as pd
 from xgboost import XGBClassifier
 from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
 
-# 📥 Load fused dataset
+#  Load fused dataset
 fused = pd.read_csv("data/fused/fused_ndvi_weather_thermal.csv")
 
-# 🧠 Define features and target
+#  Define features and target
 features = ['ndvi', 'temp', 'rh', 'wind', 'precip', 'dryness_index']
 X = fused[features]
 y = fused['thermal_flag']
 
-# 🚀 Train model on full data
-model = XGBClassifier()
-model.fit(X, y)
+#  Train-test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, stratify=y, random_state=42
+)
 
-# 📊 Predict on same data
-y_pred = model.predict(X)
-print(classification_report(y, y_pred, zero_division=0))
+#  Safe SMOTE resampling
+if sum(y_train == 1) >= 2:
+    print(f" Applying SMOTE (minority samples: {sum(y_train == 1)})")
+    smote = SMOTE(k_neighbors=1)
+    X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+else:
+    print(f" Too few minority samples ({sum(y_train == 1)}) for SMOTE. Skipping resampling.")
+    X_train_resampled, y_train_resampled = X_train, y_train
 
-fused['predicted_risk'] = model.predict_proba(X)[:, 1]
-fused[['district', 'predicted_risk']].to_csv("data/fused/predicted_risk.csv", index=False)
+#  Train model
+model = XGBClassifier(
+    n_estimators=100,
+    learning_rate=0.05,
+    max_depth=4,
+    random_state=42
+)
+model.fit(X_train_resampled, y_train_resampled)
+
+# Evaluate on test set
+y_pred = model.predict(X_test)
+print("\n Evaluation on test set:")
+print(classification_report(y_test, y_pred, zero_division=0))
+
+#  Export test predictions
+fused_test = fused.iloc[y_test.index].copy()
+fused_test['predicted_risk'] = model.predict_proba(X_test)[:, 1]
+fused_test[['district', 'predicted_risk']].to_csv("data/fused/predicted_risk.csv", index=False)
+print("Test predictions exported to data/fused/predicted_risk.csv")
